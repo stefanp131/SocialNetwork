@@ -1,4 +1,5 @@
-import React, { useRef, useCallback, useState, useEffect } from 'react';
+import React, { useRef, useCallback, useEffect } from 'react';
+import { useReduxState } from './store/useReduxState';
 
 const ToolbarIcon = ({ path, size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -43,7 +44,7 @@ const HEADING_OPTIONS = [
 
 function ImageResizer({ img, onDeselect, onResize }) {
   const wrapperRef = useRef(null);
-  const [dragging, setDragging] = useState(false);
+  const [dragging, setDragging] = useReduxState<boolean>('rte.imageResizer.dragging', false);
   const dragData = useRef(null);
 
   const handleMouseDown = (e, corner) => {
@@ -147,8 +148,8 @@ function ImageResizer({ img, onDeselect, onResize }) {
 function RichTextEditor({ value, onChange }) {
   const editorRef = useRef(null);
   const fileInputRef = useRef(null);
-  const [showHeadingMenu, setShowHeadingMenu] = useState(false);
-  const [selectedImg, setSelectedImg] = useState(null);
+  const [showHeadingMenu, setShowHeadingMenu] = useReduxState<boolean>('rte.showHeadingMenu', false);
+  const [selectedImg, setSelectedImg] = useReduxState<HTMLImageElement | null>('rte.selectedImg', null);
 
   useEffect(() => {
     if (editorRef.current && value !== editorRef.current.innerHTML) {

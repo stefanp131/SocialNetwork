@@ -1,8 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import RichTextEditor from './RichTextEditor';
 import ChatStrip, { openChat } from './Chat';
+import { useAppDispatch, useAppSelector } from './store/hooks';
+import {
+  setToken,
+  setUsername,
+  setCurrentUserProfile,
+  setUnreadMessages,
+  clearSession,
+} from './store/appSlice';
+import { useReduxState } from './store/useReduxState';
 import './index.css';
 
 const API_URL = 'http://127.0.0.1:4000/api';
@@ -101,11 +110,11 @@ function Avatar({ userId, imageSrc, size = 28 }) {
 }
 
 function Login({ setGlobalToken, setGlobalUsername }) {
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [isRegistering, setIsRegistering] = useState(false);
+  const [username, setUsername] = useReduxState<string>('login.username', '');
+  const [email, setEmail] = useReduxState<string>('login.email', '');
+  const [password, setPassword] = useReduxState<string>('login.password', '');
+  const [confirmPassword, setConfirmPassword] = useReduxState<string>('login.confirmPassword', '');
+  const [isRegistering, setIsRegistering] = useReduxState<boolean>('login.isRegistering', false);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -249,13 +258,13 @@ function Layout({ username, handleLogout, userProfile, unreadMessages, children 
 }
 
 function OurSpace({ currentUsername }) {
-  const [posts, setPosts] = useState([]);
-  const [profilesByUserId, setProfilesByUserId] = useState({});
-  const [newPostContent, setNewPostContent] = useState('');
-  const [visibility, setVisibility] = useState('public');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
+  const [posts, setPosts] = useReduxState<any[]>(`ourSpace.${currentUsername}.posts`, []);
+  const [profilesByUserId, setProfilesByUserId] = useReduxState<Record<string, any>>(`ourSpace.${currentUsername}.profilesByUserId`, {});
+  const [newPostContent, setNewPostContent] = useReduxState<string>(`ourSpace.${currentUsername}.newPostContent`, '');
+  const [visibility, setVisibility] = useReduxState<'public' | 'private'>(`ourSpace.${currentUsername}.visibility`, 'public');
+  const [searchQuery, setSearchQuery] = useReduxState<string>(`ourSpace.${currentUsername}.searchQuery`, '');
+  const [searchResults, setSearchResults] = useReduxState<any[]>(`ourSpace.${currentUsername}.searchResults`, []);
+  const [isSearching, setIsSearching] = useReduxState<boolean>(`ourSpace.${currentUsername}.isSearching`, false);
 
   useEffect(() => {
     fetchOurSpaceFeed();
@@ -434,19 +443,19 @@ function OurSpace({ currentUsername }) {
 
 
 function MySpace({ currentUsername, onProfileUpdated }) {
-  const [profile, setProfile] = useState({ name: '', bio: '', profileImage: '', followers: [], following: [] });
-  const [posts, setPosts] = useState([]);
-  const [profilesByUserId, setProfilesByUserId] = useState({});
-  const [newPostContent, setNewPostContent] = useState('');
-  const [visibility, setVisibility] = useState('public');
-  const [isEditing, setIsEditing] = useState(false);
-  const [activeTab, setActiveTab] = useState('all');
-  const [isImageDialogOpen, setIsImageDialogOpen] = useState(false);
-  const [selectedImageFile, setSelectedImageFile] = useState(null);
-  const [selectedImageName, setSelectedImageName] = useState('');
-  const [imageUploadProgress, setImageUploadProgress] = useState(0);
-  const [isImageUploading, setIsImageUploading] = useState(false);
-  const [pendingProfileImage, setPendingProfileImage] = useState('');
+  const [profile, setProfile] = useReduxState<any>(`mySpace.${currentUsername}.profile`, { name: '', bio: '', profileImage: '', followers: [], following: [] });
+  const [posts, setPosts] = useReduxState<any[]>(`mySpace.${currentUsername}.posts`, []);
+  const [profilesByUserId, setProfilesByUserId] = useReduxState<Record<string, any>>(`mySpace.${currentUsername}.profilesByUserId`, {});
+  const [newPostContent, setNewPostContent] = useReduxState<string>(`mySpace.${currentUsername}.newPostContent`, '');
+  const [visibility, setVisibility] = useReduxState<'public' | 'private'>(`mySpace.${currentUsername}.visibility`, 'public');
+  const [isEditing, setIsEditing] = useReduxState<boolean>(`mySpace.${currentUsername}.isEditing`, false);
+  const [activeTab, setActiveTab] = useReduxState<'all' | 'public' | 'private'>(`mySpace.${currentUsername}.activeTab`, 'all');
+  const [isImageDialogOpen, setIsImageDialogOpen] = useReduxState<boolean>(`mySpace.${currentUsername}.isImageDialogOpen`, false);
+  const [selectedImageFile, setSelectedImageFile] = useReduxState<File | null>(`mySpace.${currentUsername}.selectedImageFile`, null);
+  const [selectedImageName, setSelectedImageName] = useReduxState<string>(`mySpace.${currentUsername}.selectedImageName`, '');
+  const [imageUploadProgress, setImageUploadProgress] = useReduxState<number>(`mySpace.${currentUsername}.imageUploadProgress`, 0);
+  const [isImageUploading, setIsImageUploading] = useReduxState<boolean>(`mySpace.${currentUsername}.isImageUploading`, false);
+  const [pendingProfileImage, setPendingProfileImage] = useReduxState<string>(`mySpace.${currentUsername}.pendingProfileImage`, '');
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -768,11 +777,11 @@ function MySpace({ currentUsername, onProfileUpdated }) {
           Posts by You
         </h3>
         <div className="tab-bar">
-          {[
+          {([
             { key: 'all', label: 'All' },
             { key: 'public', label: 'Public' },
             { key: 'private', label: 'Private' },
-          ].map(tab => (
+          ] as const).map(tab => (
             <button
               key={tab.key}
               className={`tab-btn ${activeTab === tab.key ? 'active' : ''}`}
@@ -813,9 +822,9 @@ function MySpace({ currentUsername, onProfileUpdated }) {
 
 function Profile({ currentUsername }) {
   const { userId } = useParams();
-  const [profile, setProfile] = useState({ name: '', bio: '', profileImage: '', followers: [], following: [] });
-  const [posts, setPosts] = useState([]);
-  const [profilesByUserId, setProfilesByUserId] = useState({});
+  const [profile, setProfile] = useReduxState<any>(`profilePage.${userId}.profile`, { name: '', bio: '', profileImage: '', followers: [], following: [] });
+  const [posts, setPosts] = useReduxState<any[]>(`profilePage.${userId}.posts`, []);
+  const [profilesByUserId, setProfilesByUserId] = useReduxState<Record<string, any>>(`profilePage.${userId}.profilesByUserId`, {});
   
   const isFollowing = profile.followers?.includes(currentUsername);
 
@@ -948,51 +957,54 @@ function Profile({ currentUsername }) {
 import { Navigate } from 'react-router-dom';
 
 function App() {
-  const [token, setToken] = useState(localStorage.getItem('token'));
-  const [username, setUsername] = useState(localStorage.getItem('username') || '');
-  const [currentUserProfile, setCurrentUserProfile] = useState({ name: '', profileImage: '' });
-  const [unreadMessages, setUnreadMessages] = useState(0);
+  const dispatch = useAppDispatch();
+  const token = useAppSelector((state) => state.app.token);
+  const username = useAppSelector((state) => state.app.username);
+  const currentUserProfile = useAppSelector((state) => state.app.currentUserProfile);
+  const unreadMessages = useAppSelector((state) => state.app.unreadMessages);
 
   useEffect(() => {
     const fetchCurrentUserProfile = async () => {
       if (!token || !username) {
-        setCurrentUserProfile({ name: '', profileImage: '' });
+        dispatch(setCurrentUserProfile({ name: '', profileImage: '' }));
         return;
       }
 
       try {
         const res = await axios.get(`${API_URL}/users/${username}`);
-        setCurrentUserProfile({
+        dispatch(setCurrentUserProfile({
           name: res.data?.name || username,
           profileImage: res.data?.profileImage || '',
-        });
+        }));
       } catch (error) {
         console.error('Error fetching current user profile for navbar:', error);
-        setCurrentUserProfile({ name: username, profileImage: '' });
+        dispatch(setCurrentUserProfile({ name: username, profileImage: '' }));
       }
     };
 
     fetchCurrentUserProfile();
-  }, [token, username]);
+  }, [token, username, dispatch]);
 
   const handleLogout = () => {
-    setToken(null);
-    setUsername('');
-    setCurrentUserProfile({ name: '', profileImage: '' });
-    setUnreadMessages(0);
+    dispatch(clearSession());
     localStorage.removeItem('token');
     localStorage.removeItem('username');
   };
 
   const handleCurrentUserProfileUpdated = (profile) => {
-    setCurrentUserProfile({
+    dispatch(setCurrentUserProfile({
       name: profile?.name || username,
       profileImage: profile?.profileImage || '',
-    });
+    }));
   };
 
   if (!token) {
-    return <Login setGlobalToken={setToken} setGlobalUsername={setUsername} />;
+    return (
+      <Login
+        setGlobalToken={(newToken) => dispatch(setToken(newToken))}
+        setGlobalUsername={(newUsername) => dispatch(setUsername(newUsername))}
+      />
+    );
   }
 
   return (
@@ -1005,7 +1017,7 @@ function App() {
           <Route path="/profile/:userId" element={<Profile currentUsername={username} />} />
         </Routes>
       </Layout>
-      <ChatStrip currentUsername={username} onUnreadChange={setUnreadMessages} />
+      <ChatStrip currentUsername={username} onUnreadChange={(count) => dispatch(setUnreadMessages(count))} />
     </BrowserRouter>
   );
 }

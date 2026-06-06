@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
+import { useReduxState } from './store/useReduxState';
 
 const API_URL = 'http://127.0.0.1:4000/api';
 const CHAT_URL = API_URL + '/chat';
@@ -72,9 +73,9 @@ function StatusTick({ status }) {
 
 // --- Single conversation dialog card ---
 function ChatDialog({ currentUsername, partnerId, partnerProfile, onClose, onDialogViewed }) {
-  var [messages, setMessages] = useState([]);
-  var [draft, setDraft] = useState('');
-  var [isMinimised, setIsMinimised] = useState(false);
+  var [messages, setMessages] = useReduxState<any[]>(`chat.dialog.${currentUsername}.${partnerId}.messages`, []);
+  var [draft, setDraft] = useReduxState<string>(`chat.dialog.${currentUsername}.${partnerId}.draft`, '');
+  var [isMinimised, setIsMinimised] = useReduxState<boolean>(`chat.dialog.${currentUsername}.${partnerId}.isMinimised`, false);
   var bottomRef = useRef(null);
   var inputRef = useRef(null);
 
@@ -238,8 +239,8 @@ function ChatDialog({ currentUsername, partnerId, partnerProfile, onClose, onDia
 
 // --- Chat strip: manages the row of open dialog cards ---
 function ChatStrip({ currentUsername, onUnreadChange }) {
-  var [openDialogs, setOpenDialogs] = useState([]);
-  var [partnerProfiles, setPartnerProfiles] = useState({});
+  var [openDialogs, setOpenDialogs] = useReduxState<any[]>(`chat.strip.${currentUsername}.openDialogs`, []);
+  var [partnerProfiles, setPartnerProfiles] = useReduxState<Record<string, any>>(`chat.strip.${currentUsername}.partnerProfiles`, {});
   var latestIncomingByPartnerRef = useRef({});
   var overflowRef = useRef(null);
 
