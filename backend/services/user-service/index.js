@@ -97,6 +97,7 @@ const UserProfileSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
   name: String,
   bio: String,
+  profileImage: { type: String, default: '' },
   following: { type: [String], default: [] },
   followers: { type: [String], default: [] }
 });
@@ -127,10 +128,10 @@ app.get('/:id', async (req, res) => {
 
 app.post('/:id', async (req, res) => {
   try {
-    const { name, bio } = req.body;
+    const { name, bio, profileImage } = req.body;
     const profile = await UserProfile.findOneAndUpdate(
       { userId: req.params.id },
-      { $set: { name, bio } },
+      { $set: { name, bio, profileImage: profileImage || '' } },
       { new: true, upsert: true }
     );
     

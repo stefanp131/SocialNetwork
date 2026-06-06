@@ -39,12 +39,15 @@ services:
       - AUTH_SERVICE_URL=http://auth-service:4001
       - USER_SERVICE_URL=http://user-service:4002
       - POST_SERVICE_URL=http://post-service:4003
+      - CHAT_SERVICE_URL=http://chat-service:4004
     depends_on:
       auth-service:
         condition: service_started
       user-service:
         condition: service_started
       post-service:
+        condition: service_started
+      chat-service:
         condition: service_started
 
   auth-service:
@@ -88,6 +91,18 @@ services:
       mongodb:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+
+  chat-service:
+    build:
+      context: ./backend/services/chat-service
+    networks:
+      - app-network
+    environment:
+      - PORT=4004
+      - MONGO_URI=mongodb://mongodb:27017/chat_db
+    depends_on:
+      mongodb:
         condition: service_healthy
 
 networks:

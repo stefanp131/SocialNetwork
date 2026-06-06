@@ -1,10 +1,104 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import RichTextEditor from './RichTextEditor';
+import ChatStrip, { openChat } from './Chat';
 import './index.css';
 
 const API_URL = 'http://127.0.0.1:4000/api';
+const MAX_PROFILE_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
+
+const readFileAsDataUrl = (file, onProgress) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onprogress = (event) => {
+    if (event.lengthComputable && onProgress) {
+      onProgress(Math.round((event.loaded / event.total) * 70));
+    }
+  };
+  reader.onload = () => {
+    if (onProgress) {
+      onProgress(70);
+    }
+    resolve(reader.result);
+  };
+  reader.onerror = () => reject(new Error('Failed to read image file'));
+  reader.readAsDataURL(file);
+});
+
+const fetchProfilesByUserId = async (userIds) => {
+  const uniqueUserIds = [...new Set((userIds || []).filter(Boolean))];
+  if (!uniqueUserIds.length) {
+    return {};
+  }
+
+  const profiles = await Promise.all(
+    uniqueUserIds.map(async (id) => {
+      try {
+        const response = await axios.get(`${API_URL}/users/${id}`);
+        return [
+          id,
+          {
+            displayName: response.data?.name || id,
+            profileImage: response.data?.profileImage || '',
+          },
+        ];
+      } catch (error) {
+        console.error(`Error fetching profile for ${id}:`, error);
+        return [
+          id,
+          {
+            displayName: id,
+            profileImage: '',
+          },
+        ];
+      }
+    })
+  );
+
+  return Object.fromEntries(profiles);
+};
+
+function Avatar({ userId, imageSrc, size = 28 }) {
+  const fallbackLabel = (userId || '?').slice(0, 1).toUpperCase();
+
+  if (imageSrc) {
+    return (
+      <img
+        src={imageSrc}
+        alt={`${userId || 'user'} avatar`}
+        style={{
+          width: `${size}px`,
+          height: `${size}px`,
+          borderRadius: '50%',
+          objectFit: 'cover',
+          border: '1px solid rgba(255,255,255,0.2)',
+          flexShrink: 0,
+        }}
+      />
+    );
+  }
+
+  return (
+    <div
+      style={{
+        width: `${size}px`,
+        height: `${size}px`,
+        borderRadius: '50%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(255,255,255,0.08)',
+        color: 'var(--text-main)',
+        fontSize: `${Math.max(12, Math.floor(size * 0.45))}px`,
+        fontWeight: 700,
+        border: '1px solid rgba(255,255,255,0.2)',
+        flexShrink: 0,
+      }}
+    >
+      {fallbackLabel}
+    </div>
+  );
+}
 
 function Login({ setGlobalToken, setGlobalUsername }) {
   const [username, setUsername] = useState('');
@@ -120,20 +214,30 @@ function Login({ setGlobalToken, setGlobalUsername }) {
   );
 }
 
-function Layout({ username, handleLogout, children }) {
+function Layout({ username, handleLogout, userProfile, unreadMessages, children }) {
+  const displayName = userProfile?.name || username;
+
   return (
     <div className="app-container">
-      <header className="header">
+      <header className="header navbar">
         <Link to="/our-space" className="logo" style={{ textDecoration: 'none' }}>Nexus</Link>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <nav style={{ display: 'flex', gap: '1rem' }}>
+        <div className="navbar-right">
+          <nav className="navbar-links">
             <Link to="/our-space" style={{ color: 'var(--text-main)', textDecoration: 'none', fontWeight: '500' }}>Our Space</Link>
             <Link to="/my-space" style={{ color: 'var(--text-main)', textDecoration: 'none', fontWeight: '500' }}>My Space</Link>
           </nav>
           <div style={{ width: '1px', height: '24px', background: 'rgba(255,255,255,0.2)' }}></div>
-          <Link to="/my-space" style={{ color: 'var(--text-main)', textDecoration: 'none', fontWeight: 'bold' }}>
-            {username}
+          <Link to="/my-space" className="navbar-user-link">
+            <Avatar userId={username} imageSrc={userProfile?.profileImage} size={24} />
+            <div className="navbar-user-meta">
+              <span className="navbar-display-name">{displayName}</span>
+              <span className="navbar-username">@{username}</span>
+            </div>
           </Link>
+          <div className="navbar-notification" title="Unread messages">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            {unreadMessages > 0 && <span className="navbar-notification-badge">{unreadMessages > 99 ? '99+' : unreadMessages}</span>}
+          </div>
           <button className="btn" onClick={handleLogout} style={{ background: 'transparent', border: '1px solid var(--primary)', color: 'var(--text-main)', padding: '0.4rem 1rem' }}>Logout</button>
         </div>
       </header>
@@ -146,6 +250,7 @@ function Layout({ username, handleLogout, children }) {
 
 function OurSpace({ currentUsername }) {
   const [posts, setPosts] = useState([]);
+  const [profilesByUserId, setProfilesByUserId] = useState({});
   const [newPostContent, setNewPostContent] = useState('');
   const [visibility, setVisibility] = useState('public');
   const [searchQuery, setSearchQuery] = useState('');
@@ -166,8 +271,11 @@ function OurSpace({ currentUsername }) {
       if (following.length > 0) {
         const postsRes = await axios.get(`${API_URL}/posts?userIds=${following.join(',')}`);
         setPosts(postsRes.data);
+        const profileMap = await fetchProfilesByUserId(postsRes.data.map((post) => post.userId));
+        setProfilesByUserId(profileMap);
       } else {
         setPosts([]);
+        setProfilesByUserId({});
       }
     } catch (err) {
       console.error('Error fetching our space feed:', err);
@@ -185,7 +293,7 @@ function OurSpace({ currentUsername }) {
     
     setIsSearching(true);
     try {
-      const res = await axios.get(`${API_URL}/auth/search?q=${encodeURIComponent(q)}`);
+      const res = await axios.get(`${API_URL}/users/search?q=${encodeURIComponent(q)}`);
       setSearchResults(res.data);
     } catch (err) {
       console.error('Search error:', err);
@@ -204,6 +312,17 @@ function OurSpace({ currentUsername }) {
       fetchOurSpaceFeed();
     } catch (err) {
       console.error('Post error:', err);
+    }
+  };
+
+  const handleToggleLike = async (postId) => {
+    try {
+      const res = await axios.post(`${API_URL}/posts/${postId}/like`, { userId: currentUsername });
+      setPosts((prev) => prev.map((post) => (post._id === postId ? res.data.post : post)));
+    } catch (err) {
+      console.error('Like toggle error:', err);
+      const message = err.response?.data?.error || 'Could not update like.';
+      alert(message);
     }
   };
 
@@ -228,8 +347,11 @@ function OurSpace({ currentUsername }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {searchResults.map(u => (
                   <Link key={u.userId} to={`/profile/${u.userId}`} className="search-result-item" style={{ display: 'flex', alignItems: 'center', padding: '0.5rem', borderRadius: '4px', textDecoration: 'none', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <div style={{ fontWeight: 'bold', color: 'var(--primary)', flex: 1 }}>{u.name || u.userId}</div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{u.userId}</div>
+                    <Avatar userId={u.userId} imageSrc={u.profileImage} size={24} />
+                    <div style={{ marginLeft: '0.6rem', flex: 1 }}>
+                      <div style={{ fontWeight: 'bold', color: 'var(--primary)' }}>{u.name || u.userId}</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>@{u.userId}</div>
+                    </div>
                   </Link>
                 ))}
               </div>
@@ -278,13 +400,30 @@ function OurSpace({ currentUsername }) {
       <div className="post-grid">
         {posts.map(post => (
           <div key={post._id} className="glass-card">
-            <div className="post-header">
-              <Link to={`/profile/${post.userId}`} style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 'bold' }}>
-                {post.userId}
-              </Link>
-              <span style={{ color: 'var(--text-muted)' }}> • {new Date(post.createdAt).toLocaleString()}</span>
+            <div className="post-header" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <Avatar userId={post.userId} imageSrc={profilesByUserId[post.userId]?.profileImage} size={28} />
+              <div>
+                <Link to={`/profile/${post.userId}`} style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 'bold' }}>
+                  {profilesByUserId[post.userId]?.displayName || post.userId}
+                </Link>
+                <span style={{ color: 'var(--text-muted)', marginLeft: '0.4rem' }}>@{post.userId}</span>
+                <span style={{ color: 'var(--text-muted)' }}> • {new Date(post.createdAt).toLocaleString()}</span>
+              </div>
             </div>
             <div className="post-content" dangerouslySetInnerHTML={{ __html: post.content }} />
+            {post.userId !== currentUsername && (
+              <div className="post-actions">
+                <button
+                  type="button"
+                  className={`like-btn ${(post.likes || []).includes(currentUsername) ? 'liked' : ''}`}
+                  onClick={() => handleToggleLike(post._id)}
+                >
+                  <span>❤</span>
+                  <span>{(post.likes || []).includes(currentUsername) ? 'Liked' : 'Like'}</span>
+                  <span className="like-count">{(post.likes || []).length}</span>
+                </button>
+              </div>
+            )}
           </div>
         ))}
         {posts.length === 0 && <p style={{ color: 'var(--text-muted)', gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>You aren't following anyone yet, or they haven't posted. Use the search bar above to find people!</p>}
@@ -294,13 +433,21 @@ function OurSpace({ currentUsername }) {
 }
 
 
-function MySpace({ currentUsername }) {
-  const [profile, setProfile] = useState({ name: '', bio: '', followers: [], following: [] });
+function MySpace({ currentUsername, onProfileUpdated }) {
+  const [profile, setProfile] = useState({ name: '', bio: '', profileImage: '', followers: [], following: [] });
   const [posts, setPosts] = useState([]);
+  const [profilesByUserId, setProfilesByUserId] = useState({});
   const [newPostContent, setNewPostContent] = useState('');
   const [visibility, setVisibility] = useState('public');
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
+  const [isImageDialogOpen, setIsImageDialogOpen] = useState(false);
+  const [selectedImageFile, setSelectedImageFile] = useState(null);
+  const [selectedImageName, setSelectedImageName] = useState('');
+  const [imageUploadProgress, setImageUploadProgress] = useState(0);
+  const [isImageUploading, setIsImageUploading] = useState(false);
+  const [pendingProfileImage, setPendingProfileImage] = useState('');
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     fetchProfile();
@@ -310,7 +457,17 @@ function MySpace({ currentUsername }) {
   const fetchProfile = async () => {
     try {
       const res = await axios.get(`${API_URL}/users/${currentUsername}`);
-      setProfile({ name: res.data.name || '', bio: res.data.bio || '', followers: res.data.followers || [], following: res.data.following || [] });
+      const loadedProfile = {
+        name: res.data.name || '',
+        bio: res.data.bio || '',
+        profileImage: res.data.profileImage || '',
+        followers: res.data.followers || [],
+        following: res.data.following || [],
+      };
+      setProfile(loadedProfile);
+      if (onProfileUpdated) {
+        onProfileUpdated(loadedProfile);
+      }
     } catch (err) {
       console.error('Error fetching profile:', err);
     }
@@ -320,15 +477,102 @@ function MySpace({ currentUsername }) {
     try {
       const res = await axios.get(`${API_URL}/posts?userId=${currentUsername}&viewer=${currentUsername}`);
       setPosts(res.data);
+      const profileMap = await fetchProfilesByUserId(res.data.map((post) => post.userId));
+      setProfilesByUserId(profileMap);
     } catch (err) {
       console.error('Error fetching user posts:', err);
+    }
+  };
+
+  const handleProfileImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please choose an image file.');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > MAX_PROFILE_IMAGE_SIZE_BYTES) {
+      alert('Profile image must be 2MB or smaller.');
+      e.target.value = '';
+      return;
+    }
+
+    setSelectedImageFile(file);
+    setSelectedImageName(file.name);
+    setImageUploadProgress(0);
+    e.target.value = '';
+  };
+
+  const openImageDialog = () => {
+    setSelectedImageFile(null);
+    setSelectedImageName('');
+    setImageUploadProgress(0);
+    setIsImageDialogOpen(true);
+  };
+
+  const closeImageDialog = () => {
+    if (isImageUploading) {
+      return;
+    }
+    setIsImageDialogOpen(false);
+  };
+
+  const handleUploadProfileImage = async () => {
+    if (!selectedImageFile || isImageUploading) {
+      return;
+    }
+
+    setIsImageUploading(true);
+    setImageUploadProgress(5);
+
+    try {
+      const imageDataUrl = await readFileAsDataUrl(selectedImageFile, (progress) => {
+        setImageUploadProgress(Math.max(5, Math.min(progress, 95)));
+      });
+
+      setImageUploadProgress(100);
+      setPendingProfileImage(imageDataUrl);
+
+      setTimeout(() => {
+        setIsImageDialogOpen(false);
+        setIsImageUploading(false);
+        setSelectedImageFile(null);
+        setSelectedImageName('');
+        setImageUploadProgress(0);
+      }, 350);
+    } catch (error) {
+      console.error('Error processing profile image:', error);
+      alert('Could not process your image. Please try again.');
+      setIsImageUploading(false);
     }
   };
 
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API_URL}/users/${currentUsername}`, profile);
+      const nextProfile = {
+        ...profile,
+        profileImage: pendingProfileImage || profile.profileImage || '',
+      };
+
+      await axios.post(`${API_URL}/users/${currentUsername}`, nextProfile);
+      setProfile(nextProfile);
+      setPendingProfileImage('');
+      setProfilesByUserId((prev) => ({
+        ...prev,
+        [currentUsername]: {
+          displayName: nextProfile.name || currentUsername,
+          profileImage: nextProfile.profileImage || '',
+        },
+      }));
+      if (onProfileUpdated) {
+        onProfileUpdated(nextProfile);
+      }
       setIsEditing(false);
     } catch (err) {
       console.error('Error updating profile:', err);
@@ -358,6 +602,9 @@ function MySpace({ currentUsername }) {
   return (
     <>
       <div className="glass-card" style={{ marginBottom: '2rem', textAlign: 'center' }}>
+        <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'center' }}>
+          <Avatar userId={currentUsername} imageSrc={profile.profileImage} size={82} />
+        </div>
         <h2 className="logo" style={{ marginBottom: '0.5rem', fontSize: '2.5rem' }}>{profile.name || currentUsername}</h2>
         <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', fontSize: '1.1rem' }}>{profile.bio || 'No bio provided yet.'}</p>
         
@@ -386,13 +633,98 @@ function MySpace({ currentUsername }) {
               onChange={e => setProfile({...profile, bio: e.target.value})} 
               rows={3}
             />
+            <div className="profile-image-row">
+              <div>
+                <div className="profile-image-title">Profile Image</div>
+                <small style={{ color: 'var(--text-muted)' }}>PNG, JPG, GIF, WEBP up to 2MB</small>
+                {pendingProfileImage && (
+                  <div style={{ color: '#a5b4fc', marginTop: '0.35rem', fontSize: '0.8rem' }}>
+                    New image selected. Click Save to apply.
+                  </div>
+                )}
+              </div>
+              <button type="button" className="upload-btn" onClick={openImageDialog}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Upload Image
+              </button>
+            </div>
             <div style={{ display: 'flex', gap: '1rem' }}>
               <button type="submit" className="btn" style={{ flex: 1 }}>Save</button>
-              <button type="button" className="btn" style={{ flex: 1, background: 'transparent', border: '1px solid var(--text-muted)' }} onClick={() => setIsEditing(false)}>Cancel</button>
+              <button
+                type="button"
+                className="btn"
+                style={{ flex: 1, background: 'transparent', border: '1px solid var(--text-muted)' }}
+                onClick={() => {
+                  setPendingProfileImage('');
+                  setIsEditing(false);
+                  fetchProfile();
+                }}
+              >
+                Cancel
+              </button>
             </div>
           </form>
         )}
       </div>
+
+      {isImageDialogOpen && (
+        <div className="dialog-backdrop" onClick={closeImageDialog}>
+          <div className="upload-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="upload-dialog-head">
+              <h3 style={{ margin: 0 }}>Upload Profile Image</h3>
+              <button
+                type="button"
+                className="dialog-close-btn"
+                onClick={closeImageDialog}
+                disabled={isImageUploading}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="upload-dropzone">
+              <Avatar userId={currentUsername} imageSrc={profile.profileImage} size={64} />
+              <p style={{ margin: '0.75rem 0 0.25rem', color: 'var(--text-main)' }}>
+                {selectedImageName || 'Choose an image to upload'}
+              </p>
+              <small style={{ color: 'var(--text-muted)' }}>Your avatar appears ahead of every post.</small>
+              <input
+                ref={fileInputRef}
+                id="profile-image-upload"
+                type="file"
+                accept="image/*"
+                onChange={handleProfileImageChange}
+                style={{ display: 'none' }}
+              />
+              <button
+                type="button"
+                className="upload-secondary-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isImageUploading}
+              >
+                Choose File
+              </button>
+            </div>
+
+            <div className="upload-progress-wrap">
+              <div className="upload-progress-label">
+                <span>{isImageUploading ? 'Processing image...' : 'Ready to process'}</span>
+                <span>{imageUploadProgress}%</span>
+              </div>
+              <div className="upload-progress-track">
+                <div className="upload-progress-fill" style={{ width: `${imageUploadProgress}%` }} />
+              </div>
+            </div>
+
+            <div className="upload-dialog-actions">
+              <button type="button" className="btn" style={{ background: 'transparent', border: '1px solid var(--text-muted)' }} onClick={closeImageDialog} disabled={isImageUploading}>Cancel</button>
+              <button type="button" className="btn" onClick={handleUploadProfileImage} disabled={!selectedImageFile || isImageUploading}>
+                {isImageUploading ? 'Processing...' : 'Use This Image'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="glass-card" style={{ marginBottom: '2rem' }}>
         <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -456,8 +788,13 @@ function MySpace({ currentUsername }) {
         {filteredPosts.map(post => (
           <div key={post._id} className="glass-card">
             <div className="post-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <strong style={{ color: 'var(--primary)' }}>{post.userId}</strong> • {new Date(post.createdAt).toLocaleString()}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <Avatar userId={post.userId} imageSrc={profilesByUserId[post.userId]?.profileImage} size={28} />
+                <div>
+                  <strong style={{ color: 'var(--primary)' }}>{profilesByUserId[post.userId]?.displayName || post.userId}</strong>
+                  <span style={{ color: 'var(--text-muted)', marginLeft: '0.4rem' }}>@{post.userId}</span>
+                  <span style={{ color: 'var(--text-muted)' }}> • {new Date(post.createdAt).toLocaleString()}</span>
+                </div>
               </div>
               <span className={`visibility-badge ${post.visibility === 'private' ? 'badge-private' : 'badge-public'}`}>
                 {post.visibility === 'private' ? '🔒 Private' : '🌐 Public'}
@@ -476,8 +813,9 @@ function MySpace({ currentUsername }) {
 
 function Profile({ currentUsername }) {
   const { userId } = useParams();
-  const [profile, setProfile] = useState({ name: '', bio: '', followers: [], following: [] });
+  const [profile, setProfile] = useState({ name: '', bio: '', profileImage: '', followers: [], following: [] });
   const [posts, setPosts] = useState([]);
+  const [profilesByUserId, setProfilesByUserId] = useState({});
   
   const isFollowing = profile.followers?.includes(currentUsername);
 
@@ -489,7 +827,13 @@ function Profile({ currentUsername }) {
   const fetchProfile = async () => {
     try {
       const res = await axios.get(`${API_URL}/users/${userId}`);
-      setProfile({ name: res.data.name || '', bio: res.data.bio || '', followers: res.data.followers || [], following: res.data.following || [] });
+      setProfile({
+        name: res.data.name || '',
+        bio: res.data.bio || '',
+        profileImage: res.data.profileImage || '',
+        followers: res.data.followers || [],
+        following: res.data.following || [],
+      });
     } catch (err) {
       console.error('Error fetching profile:', err);
     }
@@ -499,6 +843,8 @@ function Profile({ currentUsername }) {
     try {
       const res = await axios.get(`${API_URL}/posts?userId=${userId}&viewer=${currentUsername}`);
       setPosts(res.data);
+      const profileMap = await fetchProfilesByUserId(res.data.map((post) => post.userId));
+      setProfilesByUserId(profileMap);
     } catch (err) {
       console.error('Error fetching user posts:', err);
     }
@@ -514,9 +860,23 @@ function Profile({ currentUsername }) {
     }
   };
 
+  const handleToggleLike = async (postId) => {
+    try {
+      const res = await axios.post(`${API_URL}/posts/${postId}/like`, { userId: currentUsername });
+      setPosts((prev) => prev.map((post) => (post._id === postId ? res.data.post : post)));
+    } catch (err) {
+      console.error('Like toggle error:', err);
+      const message = err.response?.data?.error || 'Could not update like.';
+      alert(message);
+    }
+  };
+
   return (
     <>
       <div className="glass-card" style={{ marginBottom: '2rem', textAlign: 'center' }}>
+        <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'center' }}>
+          <Avatar userId={userId} imageSrc={profile.profileImage} size={82} />
+        </div>
         <h2 className="logo" style={{ marginBottom: '0.5rem', fontSize: '2.5rem' }}>{profile.name || userId}</h2>
         <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', fontSize: '1.1rem' }}>{profile.bio || 'No bio provided.'}</p>
         
@@ -525,17 +885,28 @@ function Profile({ currentUsername }) {
           <div><strong style={{ color: 'var(--text-main)' }}>{profile.following.length}</strong> Following</div>
         </div>
 
-        <button 
-          className="btn" 
-          onClick={handleFollowToggle}
-          style={{ 
-            background: isFollowing ? 'transparent' : 'var(--primary)',
-            border: isFollowing ? '1px solid var(--primary)' : 'none',
-            color: 'var(--text-main)'
-          }}
-        >
-          {isFollowing ? 'Unfollow' : 'Follow'}
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button 
+            className="btn" 
+            onClick={handleFollowToggle}
+            style={{ 
+              background: isFollowing ? 'transparent' : 'var(--primary)',
+              border: isFollowing ? '1px solid var(--primary)' : 'none',
+              color: 'var(--text-main)'
+            }}
+          >
+            {isFollowing ? 'Unfollow' : 'Follow'}
+          </button>
+          {currentUsername !== userId && (
+            <button
+              className="message-btn"
+              onClick={() => openChat(userId)}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              Message
+            </button>
+          )}
+        </div>
       </div>
 
       <h3 style={{ marginBottom: '1.5rem', color: 'var(--text-muted)' }}>
@@ -544,10 +915,28 @@ function Profile({ currentUsername }) {
       <div className="post-grid">
         {posts.map(post => (
           <div key={post._id} className="glass-card">
-            <div className="post-header">
-              <strong style={{ color: 'var(--primary)' }}>{post.userId}</strong> • {new Date(post.createdAt).toLocaleString()}
+            <div className="post-header" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <Avatar userId={post.userId} imageSrc={profilesByUserId[post.userId]?.profileImage} size={28} />
+              <div>
+                <strong style={{ color: 'var(--primary)' }}>{profilesByUserId[post.userId]?.displayName || post.userId}</strong>
+                <span style={{ color: 'var(--text-muted)', marginLeft: '0.4rem' }}>@{post.userId}</span>
+                <span style={{ color: 'var(--text-muted)' }}> • {new Date(post.createdAt).toLocaleString()}</span>
+              </div>
             </div>
             <div className="post-content" dangerouslySetInnerHTML={{ __html: post.content }} />
+            {post.userId !== currentUsername && (
+              <div className="post-actions">
+                <button
+                  type="button"
+                  className={`like-btn ${(post.likes || []).includes(currentUsername) ? 'liked' : ''}`}
+                  onClick={() => handleToggleLike(post._id)}
+                >
+                  <span>❤</span>
+                  <span>{(post.likes || []).includes(currentUsername) ? 'Liked' : 'Like'}</span>
+                  <span className="like-count">{(post.likes || []).length}</span>
+                </button>
+              </div>
+            )}
           </div>
         ))}
         {posts.length === 0 && <p style={{ color: 'var(--text-muted)', gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>This user hasn't posted anything public yet.</p>}
@@ -561,12 +950,45 @@ import { Navigate } from 'react-router-dom';
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [username, setUsername] = useState(localStorage.getItem('username') || '');
+  const [currentUserProfile, setCurrentUserProfile] = useState({ name: '', profileImage: '' });
+  const [unreadMessages, setUnreadMessages] = useState(0);
+
+  useEffect(() => {
+    const fetchCurrentUserProfile = async () => {
+      if (!token || !username) {
+        setCurrentUserProfile({ name: '', profileImage: '' });
+        return;
+      }
+
+      try {
+        const res = await axios.get(`${API_URL}/users/${username}`);
+        setCurrentUserProfile({
+          name: res.data?.name || username,
+          profileImage: res.data?.profileImage || '',
+        });
+      } catch (error) {
+        console.error('Error fetching current user profile for navbar:', error);
+        setCurrentUserProfile({ name: username, profileImage: '' });
+      }
+    };
+
+    fetchCurrentUserProfile();
+  }, [token, username]);
 
   const handleLogout = () => {
     setToken(null);
     setUsername('');
+    setCurrentUserProfile({ name: '', profileImage: '' });
+    setUnreadMessages(0);
     localStorage.removeItem('token');
     localStorage.removeItem('username');
+  };
+
+  const handleCurrentUserProfileUpdated = (profile) => {
+    setCurrentUserProfile({
+      name: profile?.name || username,
+      profileImage: profile?.profileImage || '',
+    });
   };
 
   if (!token) {
@@ -575,14 +997,15 @@ function App() {
 
   return (
     <BrowserRouter>
-      <Layout username={username} handleLogout={handleLogout}>
+      <Layout username={username} handleLogout={handleLogout} userProfile={currentUserProfile} unreadMessages={unreadMessages}>
         <Routes>
           <Route path="/" element={<Navigate to="/our-space" replace />} />
           <Route path="/our-space" element={<OurSpace currentUsername={username} />} />
-          <Route path="/my-space" element={<MySpace currentUsername={username} />} />
+          <Route path="/my-space" element={<MySpace currentUsername={username} onProfileUpdated={handleCurrentUserProfileUpdated} />} />
           <Route path="/profile/:userId" element={<Profile currentUsername={username} />} />
         </Routes>
       </Layout>
+      <ChatStrip currentUsername={username} onUnreadChange={setUnreadMessages} />
     </BrowserRouter>
   );
 }

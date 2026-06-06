@@ -104,6 +104,7 @@ const PostSchema = new mongoose.Schema({
   userId: { type: String, required: true },
   content: { type: String, required: true },
   visibility: { type: String, enum: ['public', 'private'], default: 'public' },
+  likes: { type: [String], default: [] },
   createdAt: { type: Date, default: Date.now }
 });
 const Post = mongoose.model('Post', PostSchema);
@@ -142,6 +143,34 @@ app.post('/', async (req, res) => {
     const post = new Post({ userId, content, visibility: visibility || 'public' });
     await post.save();
     res.status(201).json(post);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/:id/like', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const post = await Post.findById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    if (post.userId === userId) {
+      return res.status(400).json({ error: 'You cannot like your own post' });
+    }
+
+    const alreadyLiked = (post.likes || []).includes(userId);
+    const update = alreadyLiked
+      ? { $pull: { likes: userId } }
+      : { $addToSet: { likes: userId } };
+
+    const updatedPost = await Post.findByIdAndUpdate(req.params.id, update, { new: true });
+    res.json({ post: updatedPost, liked: !alreadyLiked });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
