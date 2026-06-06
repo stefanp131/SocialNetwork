@@ -1,0 +1,81 @@
+services:
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - AUTH_SERVICE_URL=http://auth-service:4001
+      - USER_SERVICE_URL=http://user-service:4002
+      - POST_SERVICE_URL=http://post-service:4003
+    depends_on:
+      auth-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+      post-service:
+        condition: service_started
+
+  auth-service:
+    build:
+      context: ./backend/services/auth-service
+    environment:
+      - PORT=4001
+      - MONGO_URI=mongodb://mongodb:27017/auth_db
+      - JWT_SECRET=supersecretjwtkey
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  user-service:
+    build:
+      context: ./backend/services/user-service
+    environment:
+      - PORT=4002
+      - MONGO_URI=mongodb://mongodb:27017/user_db
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  post-service:
+    build:
+      context: ./backend/services/post-service
+    environment:
+      - PORT=4003
+      - MONGO_URI=mongodb://mongodb:27017/post_db
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  mongodb_data:
