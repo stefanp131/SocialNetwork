@@ -186,7 +186,8 @@ function RichTextEditor({ value, onChange }) {
     const reader = new FileReader();
     reader.onload = () => {
       editorRef.current?.focus();
-      document.execCommand('insertImage', false, reader.result);
+      const imageSource = (reader.result as string) || '';
+      document.execCommand('insertImage', false, imageSource);
       // Make inserted images have a default max-width
       const imgs = editorRef.current?.querySelectorAll('img:not([style*="width"])');
       imgs?.forEach((img) => {

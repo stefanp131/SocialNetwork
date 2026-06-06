@@ -1,3 +1,5 @@
+(global as any).crypto = require('crypto');
+
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const cors = require('cors');

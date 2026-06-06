@@ -1,4 +1,4 @@
-global.crypto = require('crypto');
+(global as any).crypto = require('crypto');
 
 const express = require('express');
 const mongoose = require('mongoose');

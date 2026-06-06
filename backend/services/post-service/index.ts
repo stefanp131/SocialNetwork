@@ -1,4 +1,4 @@
-global.crypto = require('crypto');
+(global as any).crypto = require('crypto');
 
 const express = require('express');
 const mongoose = require('mongoose');
@@ -111,7 +111,7 @@ const Post = mongoose.model('Post', PostSchema);
 
 app.get('/', async (req, res) => {
   try {
-    const filter = {};
+    const filter: any = {};
 
     if (req.query.userIds) {
       // Fetch posts for multiple users (Our Space)

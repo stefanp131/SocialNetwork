@@ -8,7 +8,7 @@ import './index.css';
 const API_URL = 'http://127.0.0.1:4000/api';
 const MAX_PROFILE_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
 
-const readFileAsDataUrl = (file, onProgress) => new Promise((resolve, reject) => {
+const readFileAsDataUrl = (file: File, onProgress?: (progress: number) => void): Promise<string> => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onprogress = (event) => {
     if (event.lengthComputable && onProgress) {
@@ -19,7 +19,7 @@ const readFileAsDataUrl = (file, onProgress) => new Promise((resolve, reject) =>
     if (onProgress) {
       onProgress(70);
     }
-    resolve(reader.result);
+    resolve((reader.result as string) || '');
   };
   reader.onerror = () => reject(new Error('Failed to read image file'));
   reader.readAsDataURL(file);
