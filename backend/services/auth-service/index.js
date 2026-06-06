@@ -1,24 +1,4 @@
 global.crypto = require('crypto');
-const dns = require('node:dns');
-dns.setDefaultResultOrder('ipv4first');
-
-const originalLookup = dns.lookup;
-const dnsCache = new Map();
-dns.lookup = function(hostname, options, callback) {
-  if (typeof options === 'function') {
-    callback = options;
-    options = {};
-  }
-  if (hostname === 'mongodb' && dnsCache.has(hostname)) {
-    return callback(null, dnsCache.get(hostname), 4);
-  }
-  originalLookup(hostname, options, (err, address, family) => {
-    if (!err && hostname === 'mongodb') {
-      dnsCache.set(hostname, address);
-    }
-    callback(err, address, family);
-  });
-};
 
 const express = require('express');
 const mongoose = require('mongoose');
@@ -35,19 +15,69 @@ app.use(morgan('dev'));
 const PORT = process.env.PORT || 4001;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/auth_db';
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey';
+let isServerStarted = false;
+let hasMongoConnected = false;
+let mongoReconnectTimer;
 
+mongoose.set('bufferCommands', false);
+mongoose.set('bufferTimeoutMS', 60000);
+
+function scheduleMongoReconnect() {
+  if (mongoReconnectTimer || mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) {
+    return;
+  }
+
+  mongoReconnectTimer = setTimeout(() => {
+    mongoReconnectTimer = undefined;
+    connectMongo();
+  }, 3000);
+}
+
+function startServer() {
+  if (isServerStarted) {
+    return;
+  }
+
+  isServerStarted = true;
+  app.listen(PORT, '0.0.0.0', () => console.log(`Auth Service listening on port ${PORT}`));
+}
 
 async function connectMongo() {
   try {
-    await mongoose.connect(MONGO_URI);
+    await mongoose.connect(MONGO_URI, {
+      serverSelectionTimeoutMS: 30000,
+      connectTimeoutMS: 30000,
+    });
+    hasMongoConnected = true;
     console.log('Connected to MongoDB');
-    if (typeof connectRabbitMQ === 'function') connectRabbitMQ();
+    startServer();
   } catch (err) {
     console.error('MongoDB connection error, retrying in 3s...', err.message);
-    setTimeout(connectMongo, 3000);
+    scheduleMongoReconnect();
   }
 }
+
+mongoose.connection.on('connected', () => {
+  hasMongoConnected = true;
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.error('MongoDB disconnected. Reconnecting in 3s...');
+  scheduleMongoReconnect();
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('MongoDB connection error:', err.message);
+});
+
 connectMongo();
+
+app.use((req, res, next) => {
+  if (!hasMongoConnected) {
+    return res.status(503).json({ error: 'MongoDB is not connected yet' });
+  }
+  next();
+});
 
 // Simplified User schema for Auth purposes
 const UserSchema = new mongoose.Schema({
@@ -99,4 +129,3 @@ app.get('/search', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-app.listen(PORT, '0.0.0.0', () => console.log(`Auth Service listening on port ${PORT}`));

@@ -1,10 +1,13 @@
 services:
   mongodb:
-    image: mongo:latest
+    image: mongo:8.2
+    restart: unless-stopped
     ports:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
+    networks:
+      - app-network
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 5s
@@ -16,6 +19,8 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+    networks:
+      - app-network
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "check_running"]
       interval: 5s
@@ -27,6 +32,8 @@ services:
       context: ./backend/api-gateway
     ports:
       - "4000:4000"
+    networks:
+      - app-network
     environment:
       - PORT=4000
       - AUTH_SERVICE_URL=http://auth-service:4001
@@ -43,6 +50,8 @@ services:
   auth-service:
     build:
       context: ./backend/services/auth-service
+    networks:
+      - app-network
     environment:
       - PORT=4001
       - MONGO_URI=mongodb://mongodb:27017/auth_db
@@ -54,6 +63,8 @@ services:
   user-service:
     build:
       context: ./backend/services/user-service
+    networks:
+      - app-network
     environment:
       - PORT=4002
       - MONGO_URI=mongodb://mongodb:27017/user_db
@@ -67,6 +78,8 @@ services:
   post-service:
     build:
       context: ./backend/services/post-service
+    networks:
+      - app-network
     environment:
       - PORT=4003
       - MONGO_URI=mongodb://mongodb:27017/post_db
@@ -76,6 +89,10 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   mongodb_data:
