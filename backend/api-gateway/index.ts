@@ -1,4 +1,8 @@
-(global as any).crypto = require('crypto');
+try {
+  if (!global.crypto) {
+    (global as any).crypto = require('crypto');
+  }
+} catch (e) {}
 
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
