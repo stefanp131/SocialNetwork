@@ -99,7 +99,8 @@ const UserProfileSchema = new mongoose.Schema({
   bio: String,
   profileImage: { type: String, default: '' },
   following: { type: [String], default: [] },
-  followers: { type: [String], default: [] }
+  followers: { type: [String], default: [] },
+  followRequests: { type: [String], default: [] }
 });
 const UserProfile = mongoose.model('UserProfile', UserProfileSchema);
 
@@ -120,7 +121,7 @@ app.get('/search', async (req, res) => {
 app.get('/:id', async (req, res) => {
   try {
     const profile = await UserProfile.findOne({ userId: req.params.id });
-    res.json(profile || { following: [], followers: [] });
+    res.json(profile || { following: [], followers: [], followRequests: [] });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -184,6 +185,85 @@ app.post('/:id/unfollow', async (req, res) => {
     const updatedTarget = await UserProfile.findOneAndUpdate(
       { userId: targetId },
       { $pull: { followers: followerId } },
+      { new: true }
+    );
+
+    res.json(updatedTarget);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/:id/follow-request', async (req, res) => {
+  try {
+    const { followerId } = req.body;
+    const targetId = req.params.id;
+
+    const updatedTarget = await UserProfile.findOneAndUpdate(
+      { userId: targetId },
+      { $addToSet: { followRequests: followerId } },
+      { new: true, upsert: true }
+    );
+
+    res.json(updatedTarget);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/:id/cancel-follow-request', async (req, res) => {
+  try {
+    const { followerId } = req.body;
+    const targetId = req.params.id;
+
+    const updatedTarget = await UserProfile.findOneAndUpdate(
+      { userId: targetId },
+      { $pull: { followRequests: followerId } },
+      { new: true }
+    );
+
+    res.json(updatedTarget);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/:id/accept-follow-request', async (req, res) => {
+  try {
+    const { followerId } = req.body;
+    const targetId = req.params.id;
+
+    await UserProfile.findOneAndUpdate(
+      { userId: targetId },
+      { $pull: { followRequests: followerId } }
+    );
+
+    await UserProfile.findOneAndUpdate(
+      { userId: followerId },
+      { $addToSet: { following: targetId } },
+      { upsert: true }
+    );
+
+    const updatedTarget = await UserProfile.findOneAndUpdate(
+      { userId: targetId },
+      { $addToSet: { followers: followerId } },
+      { new: true, upsert: true }
+    );
+
+    res.json(updatedTarget);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/:id/reject-follow-request', async (req, res) => {
+  try {
+    const { followerId } = req.body;
+    const targetId = req.params.id;
+
+    const updatedTarget = await UserProfile.findOneAndUpdate(
+      { userId: targetId },
+      { $pull: { followRequests: followerId } },
       { new: true }
     );
 

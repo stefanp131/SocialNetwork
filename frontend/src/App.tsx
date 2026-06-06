@@ -9,6 +9,7 @@ import {
   setUsername,
   setCurrentUserProfile,
   setUnreadMessages,
+  setFollowRequestsCount,
   clearSession,
 } from './store/appSlice';
 import { useReduxState } from './store/useReduxState';
@@ -225,6 +226,7 @@ function Login({ setGlobalToken, setGlobalUsername }) {
 
 function Layout({ username, handleLogout, userProfile, unreadMessages, children }) {
   const displayName = userProfile?.name || username;
+  const followRequestsCount = useAppSelector((state) => state.app.followRequestsCount);
 
   return (
     <div className="app-container">
@@ -233,7 +235,14 @@ function Layout({ username, handleLogout, userProfile, unreadMessages, children 
         <div className="navbar-right">
           <nav className="navbar-links">
             <Link to="/our-space" style={{ color: 'var(--text-main)', textDecoration: 'none', fontWeight: '500' }}>Our Space</Link>
-            <Link to="/my-space" style={{ color: 'var(--text-main)', textDecoration: 'none', fontWeight: '500' }}>My Space</Link>
+            <Link to="/my-space" style={{ color: 'var(--text-main)', textDecoration: 'none', fontWeight: '500', position: 'relative' }}>
+              My Space
+              {followRequestsCount > 0 && (
+                <span className="navbar-notification-badge" style={{ position: 'absolute', top: '-11px', right: '-13px', minWidth: '16px', height: '16px', fontSize: '0.62rem', border: '1px solid var(--bg-dark)' }}>
+                  {followRequestsCount}
+                </span>
+              )}
+            </Link>
           </nav>
           <div style={{ width: '1px', height: '24px', background: 'rgba(255,255,255,0.2)' }}></div>
           <Link to="/my-space" className="navbar-user-link">
@@ -443,7 +452,7 @@ function OurSpace({ currentUsername }) {
 
 
 function MySpace({ currentUsername, onProfileUpdated }) {
-  const [profile, setProfile] = useReduxState<any>(`mySpace.${currentUsername}.profile`, { name: '', bio: '', profileImage: '', followers: [], following: [] });
+  const [profile, setProfile] = useReduxState<any>(`mySpace.${currentUsername}.profile`, { name: '', bio: '', profileImage: '', followers: [], following: [], followRequests: [] });
   const [posts, setPosts] = useReduxState<any[]>(`mySpace.${currentUsername}.posts`, []);
   const [profilesByUserId, setProfilesByUserId] = useReduxState<Record<string, any>>(`mySpace.${currentUsername}.profilesByUserId`, {});
   const [newPostContent, setNewPostContent] = useReduxState<string>(`mySpace.${currentUsername}.newPostContent`, '');
@@ -472,13 +481,38 @@ function MySpace({ currentUsername, onProfileUpdated }) {
         profileImage: res.data.profileImage || '',
         followers: res.data.followers || [],
         following: res.data.following || [],
+        followRequests: res.data.followRequests || [],
       };
       setProfile(loadedProfile);
+
+      if (loadedProfile.followRequests.length > 0) {
+        const reqProfiles = await fetchProfilesByUserId(loadedProfile.followRequests);
+        setProfilesByUserId((prev) => ({ ...prev, ...reqProfiles }));
+      }
+
       if (onProfileUpdated) {
         onProfileUpdated(loadedProfile);
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
+    }
+  };
+
+  const handleAcceptRequest = async (requesterId: string) => {
+    try {
+      await axios.post(`${API_URL}/users/${currentUsername}/accept-follow-request`, { followerId: requesterId });
+      fetchProfile();
+    } catch (err) {
+      console.error('Error accepting follow request:', err);
+    }
+  };
+
+  const handleDeclineRequest = async (requesterId: string) => {
+    try {
+      await axios.post(`${API_URL}/users/${currentUsername}/reject-follow-request`, { followerId: requesterId });
+      fetchProfile();
+    } catch (err) {
+      console.error('Error declining follow request:', err);
     }
   };
 
@@ -735,6 +769,36 @@ function MySpace({ currentUsername, onProfileUpdated }) {
         </div>
       )}
 
+      {profile.followRequests && profile.followRequests.length > 0 && (
+        <div className="glass-card" style={{ marginBottom: '2rem', border: '1px solid rgba(99, 102, 241, 0.25)', background: 'rgba(99, 102, 241, 0.03)' }}>
+          <h3 style={{ margin: '0 0 1.25rem 0', color: '#a5b4fc', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+            Follow Requests ({profile.followRequests.length})
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            {profile.followRequests.map((reqId) => (
+              <div key={reqId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '14px', border: '1px solid var(--border-light)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <Avatar userId={reqId} imageSrc={profilesByUserId[reqId]?.profileImage} size={38} />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <span style={{ fontWeight: '700', color: 'var(--text-main)', fontSize: '0.9rem' }}>{profilesByUserId[reqId]?.displayName || reqId}</span>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>@{reqId}</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button onClick={() => handleAcceptRequest(reqId)} className="btn" style={{ padding: '0.45rem 1rem', fontSize: '0.8rem', borderRadius: '10px' }}>
+                    Accept
+                  </button>
+                  <button onClick={() => handleDeclineRequest(reqId)} style={{ padding: '0.45rem 1rem', fontSize: '0.8rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: 'var(--text-muted)', borderRadius: '10px', cursor: 'pointer', fontWeight: 600 }}>
+                    Decline
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="glass-card" style={{ marginBottom: '2rem' }}>
         <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -822,11 +886,12 @@ function MySpace({ currentUsername, onProfileUpdated }) {
 
 function Profile({ currentUsername }) {
   const { userId } = useParams();
-  const [profile, setProfile] = useReduxState<any>(`profilePage.${userId}.profile`, { name: '', bio: '', profileImage: '', followers: [], following: [] });
+  const [profile, setProfile] = useReduxState<any>(`profilePage.${userId}.profile`, { name: '', bio: '', profileImage: '', followers: [], following: [], followRequests: [] });
   const [posts, setPosts] = useReduxState<any[]>(`profilePage.${userId}.posts`, []);
   const [profilesByUserId, setProfilesByUserId] = useReduxState<Record<string, any>>(`profilePage.${userId}.profilesByUserId`, {});
   
   const isFollowing = profile.followers?.includes(currentUsername);
+  const isRequested = profile.followRequests?.includes(currentUsername);
 
   useEffect(() => {
     fetchProfile();
@@ -842,6 +907,7 @@ function Profile({ currentUsername }) {
         profileImage: res.data.profileImage || '',
         followers: res.data.followers || [],
         following: res.data.following || [],
+        followRequests: res.data.followRequests || [],
       });
     } catch (err) {
       console.error('Error fetching profile:', err);
@@ -861,9 +927,14 @@ function Profile({ currentUsername }) {
 
   const handleFollowToggle = async () => {
     try {
-      const endpoint = isFollowing ? 'unfollow' : 'follow';
-      await axios.post(`${API_URL}/users/${userId}/${endpoint}`, { followerId: currentUsername });
-      fetchProfile(); // Refresh followers list
+      if (isFollowing) {
+        await axios.post(`${API_URL}/users/${userId}/unfollow`, { followerId: currentUsername });
+      } else if (isRequested) {
+        await axios.post(`${API_URL}/users/${userId}/cancel-follow-request`, { followerId: currentUsername });
+      } else {
+        await axios.post(`${API_URL}/users/${userId}/follow-request`, { followerId: currentUsername });
+      }
+      fetchProfile(); // Refresh followers and requests list
     } catch (err) {
       console.error('Error toggling follow:', err);
     }
@@ -879,6 +950,8 @@ function Profile({ currentUsername }) {
       alert(message);
     }
   };
+
+  const showPosts = userId === currentUsername || isFollowing;
 
   return (
     <>
@@ -899,12 +972,12 @@ function Profile({ currentUsername }) {
             className="btn" 
             onClick={handleFollowToggle}
             style={{ 
-              background: isFollowing ? 'transparent' : 'var(--primary)',
-              border: isFollowing ? '1px solid var(--primary)' : 'none',
-              color: 'var(--text-main)'
+              background: isFollowing ? 'transparent' : isRequested ? 'rgba(255,255,255,0.02)' : 'var(--primary)',
+              border: isFollowing ? '1px solid rgba(255,255,255,0.2)' : isRequested ? '1px solid rgba(255, 255, 255, 0.15)' : 'none',
+              color: isFollowing ? 'var(--text-muted)' : isRequested ? 'var(--text-muted)' : 'var(--text-main)'
             }}
           >
-            {isFollowing ? 'Unfollow' : 'Follow'}
+            {isFollowing ? 'Unfollow' : isRequested ? 'Requested' : 'Follow'}
           </button>
           {currentUsername !== userId && (
             <button
@@ -918,38 +991,50 @@ function Profile({ currentUsername }) {
         </div>
       </div>
 
-      <h3 style={{ marginBottom: '1.5rem', color: 'var(--text-muted)' }}>
-        Public Posts by {profile.name || userId}
-      </h3>
-      <div className="post-grid">
-        {posts.map(post => (
-          <div key={post._id} className="glass-card">
-            <div className="post-header" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <Avatar userId={post.userId} imageSrc={profilesByUserId[post.userId]?.profileImage} size={28} />
-              <div>
-                <strong style={{ color: 'var(--primary)' }}>{profilesByUserId[post.userId]?.displayName || post.userId}</strong>
-                <span style={{ color: 'var(--text-muted)', marginLeft: '0.4rem' }}>@{post.userId}</span>
-                <span style={{ color: 'var(--text-muted)' }}> • {new Date(post.createdAt).toLocaleString()}</span>
+      {!showPosts ? (
+        <div className="glass-card" style={{ textAlign: 'center', padding: '3.5rem 2rem', marginTop: '2rem', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ fontSize: '3.2rem', marginBottom: '1rem', filter: 'drop-shadow(0 0 15px rgba(99,102,241,0.25))' }}>🔒</div>
+          <h3 style={{ color: 'var(--text-main)', marginBottom: '0.6rem', fontSize: '1.45rem', fontWeight: 800 }}>This Account is Private</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', maxWidth: '380px', margin: '0 auto', lineHeight: 1.5 }}>
+            Follow this user to view their posts, photos, and active space updates.
+          </p>
+        </div>
+      ) : (
+        <>
+          <h3 style={{ marginBottom: '1.5rem', color: 'var(--text-muted)' }}>
+            Posts by {profile.name || userId}
+          </h3>
+          <div className="post-grid">
+            {posts.map(post => (
+              <div key={post._id} className="glass-card">
+                <div className="post-header" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <Avatar userId={post.userId} imageSrc={profilesByUserId[post.userId]?.profileImage} size={28} />
+                  <div>
+                    <strong style={{ color: 'var(--primary)' }}>{profilesByUserId[post.userId]?.displayName || post.userId}</strong>
+                    <span style={{ color: 'var(--text-muted)', marginLeft: '0.4rem' }}>@{post.userId}</span>
+                    <span style={{ color: 'var(--text-muted)' }}> • {new Date(post.createdAt).toLocaleString()}</span>
+                  </div>
+                </div>
+                <div className="post-content" dangerouslySetInnerHTML={{ __html: post.content }} />
+                {post.userId !== currentUsername && (
+                  <div className="post-actions">
+                    <button
+                      type="button"
+                      className={`like-btn ${(post.likes || []).includes(currentUsername) ? 'liked' : ''}`}
+                      onClick={() => handleToggleLike(post._id)}
+                    >
+                      <span>❤</span>
+                      <span>{(post.likes || []).includes(currentUsername) ? 'Liked' : 'Like'}</span>
+                      <span className="like-count">{(post.likes || []).length}</span>
+                    </button>
+                  </div>
+                )}
               </div>
-            </div>
-            <div className="post-content" dangerouslySetInnerHTML={{ __html: post.content }} />
-            {post.userId !== currentUsername && (
-              <div className="post-actions">
-                <button
-                  type="button"
-                  className={`like-btn ${(post.likes || []).includes(currentUsername) ? 'liked' : ''}`}
-                  onClick={() => handleToggleLike(post._id)}
-                >
-                  <span>❤</span>
-                  <span>{(post.likes || []).includes(currentUsername) ? 'Liked' : 'Like'}</span>
-                  <span className="like-count">{(post.likes || []).length}</span>
-                </button>
-              </div>
-            )}
+            ))}
+            {posts.length === 0 && <p style={{ color: 'var(--text-muted)', gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>This user hasn't posted anything public yet.</p>}
           </div>
-        ))}
-        {posts.length === 0 && <p style={{ color: 'var(--text-muted)', gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>This user hasn't posted anything public yet.</p>}
-      </div>
+        </>
+      )}
     </>
   );
 }
@@ -967,6 +1052,7 @@ function App() {
     const fetchCurrentUserProfile = async () => {
       if (!token || !username) {
         dispatch(setCurrentUserProfile({ name: '', profileImage: '' }));
+        dispatch(setFollowRequestsCount(0));
         return;
       }
 
@@ -976,6 +1062,7 @@ function App() {
           name: res.data?.name || username,
           profileImage: res.data?.profileImage || '',
         }));
+        dispatch(setFollowRequestsCount(res.data?.followRequests?.length || 0));
       } catch (error) {
         console.error('Error fetching current user profile for navbar:', error);
         dispatch(setCurrentUserProfile({ name: username, profileImage: '' }));
@@ -983,6 +1070,8 @@ function App() {
     };
 
     fetchCurrentUserProfile();
+    const interval = setInterval(fetchCurrentUserProfile, 8000);
+    return () => clearInterval(interval);
   }, [token, username, dispatch]);
 
   const handleLogout = () => {

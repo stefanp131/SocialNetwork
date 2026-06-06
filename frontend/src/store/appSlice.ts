@@ -10,6 +10,7 @@ type AppState = {
   username: string;
   currentUserProfile: UserProfile;
   unreadMessages: number;
+  followRequestsCount: number;
 };
 
 const initialState: AppState = {
@@ -17,6 +18,7 @@ const initialState: AppState = {
   username: localStorage.getItem('username') || '',
   currentUserProfile: { name: '', profileImage: '' },
   unreadMessages: 0,
+  followRequestsCount: 0,
 };
 
 const appSlice = createSlice({
@@ -35,11 +37,15 @@ const appSlice = createSlice({
     setUnreadMessages(state, action: PayloadAction<number>) {
       state.unreadMessages = action.payload;
     },
+    setFollowRequestsCount(state, action: PayloadAction<number>) {
+      state.followRequestsCount = action.payload;
+    },
     clearSession(state) {
       state.token = null;
       state.username = '';
       state.currentUserProfile = { name: '', profileImage: '' };
       state.unreadMessages = 0;
+      state.followRequestsCount = 0;
     },
   },
 });
@@ -49,6 +55,7 @@ export const {
   setUsername,
   setCurrentUserProfile,
   setUnreadMessages,
+  setFollowRequestsCount,
   clearSession,
 } = appSlice.actions;
 
