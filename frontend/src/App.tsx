@@ -110,6 +110,65 @@ function Avatar({ userId, imageSrc, size = 28 }) {
   );
 }
 
+function UsersListDialog({ isOpen, title, userIds, profilesByUserId, onClose }) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="dialog-backdrop" onClick={onClose}>
+      <div className="users-dialog" onClick={(e) => e.stopPropagation()} style={{ width: 'min(440px, 100%)', display: 'flex', flexDirection: 'column', maxHeight: '80vh' }}>
+        <div className="users-dialog-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--text-main)' }}>{title}</h3>
+          <button
+            type="button"
+            className="dialog-close-btn"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingRight: '4px' }}>
+          {userIds && userIds.length > 0 ? (
+            userIds.map((uId) => (
+              <Link
+                key={uId}
+                to={`/profile/${uId}`}
+                onClick={onClose}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.75rem 1rem',
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  borderRadius: '14px',
+                  border: '1px solid var(--border-light)',
+                  textDecoration: 'none',
+                }}
+                className="user-dialog-item"
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <Avatar userId={uId} imageSrc={profilesByUserId[uId]?.profileImage} size={38} />
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <span style={{ fontWeight: '700', color: 'var(--text-main)', fontSize: '0.9rem' }}>
+                      {profilesByUserId[uId]?.displayName || uId}
+                    </span>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>@{uId}</span>
+                  </div>
+                </div>
+                <div style={{ color: 'var(--primary)', fontSize: '0.8rem', fontWeight: 600 }}>View Profile →</div>
+              </Link>
+            ))
+          ) : (
+            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
+              No users found.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Login({ setGlobalToken, setGlobalUsername }) {
   const [username, setUsername] = useReduxState<string>('login.username', '');
   const [email, setEmail] = useReduxState<string>('login.email', '');
@@ -287,7 +346,7 @@ function OurSpace({ currentUsername }) {
       
       // 2. Fetch their public posts
       if (following.length > 0) {
-        const postsRes = await axios.get(`${API_URL}/posts?userIds=${following.join(',')}`);
+        const postsRes = await axios.get(`${API_URL}/posts?userIds=${following.join(',')}&viewer=${currentUsername}`);
         setPosts(postsRes.data);
         const profileMap = await fetchProfilesByUserId(postsRes.data.map((post) => post.userId));
         setProfilesByUserId(profileMap);
@@ -465,6 +524,7 @@ function MySpace({ currentUsername, onProfileUpdated }) {
   const [imageUploadProgress, setImageUploadProgress] = useReduxState<number>(`mySpace.${currentUsername}.imageUploadProgress`, 0);
   const [isImageUploading, setIsImageUploading] = useReduxState<boolean>(`mySpace.${currentUsername}.isImageUploading`, false);
   const [pendingProfileImage, setPendingProfileImage] = useReduxState<string>(`mySpace.${currentUsername}.pendingProfileImage`, '');
+  const [activeListType, setActiveListType] = useReduxState<'followers' | 'following' | null>(`mySpace.${currentUsername}.activeListType`, null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -485,8 +545,13 @@ function MySpace({ currentUsername, onProfileUpdated }) {
       };
       setProfile(loadedProfile);
 
-      if (loadedProfile.followRequests.length > 0) {
-        const reqProfiles = await fetchProfilesByUserId(loadedProfile.followRequests);
+      const userIdsToFetch = [
+        ...loadedProfile.followRequests,
+        ...loadedProfile.followers,
+        ...loadedProfile.following
+      ];
+      if (userIdsToFetch.length > 0) {
+        const reqProfiles = await fetchProfilesByUserId(userIdsToFetch);
         setProfilesByUserId((prev) => ({ ...prev, ...reqProfiles }));
       }
 
@@ -652,8 +717,12 @@ function MySpace({ currentUsername, onProfileUpdated }) {
         <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', fontSize: '1.1rem' }}>{profile.bio || 'No bio provided yet.'}</p>
         
         <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', marginBottom: '1.5rem', color: 'var(--text-muted)' }}>
-          <div><strong style={{ color: 'var(--text-main)' }}>{profile.followers.length}</strong> Followers</div>
-          <div><strong style={{ color: 'var(--text-main)' }}>{profile.following.length}</strong> Following</div>
+          <div onClick={() => setActiveListType('followers')} style={{ cursor: 'pointer' }}>
+            <strong style={{ color: 'var(--text-main)' }}>{profile.followers.length}</strong> Followers
+          </div>
+          <div onClick={() => setActiveListType('following')} style={{ cursor: 'pointer' }}>
+            <strong style={{ color: 'var(--text-main)' }}>{profile.following.length}</strong> Following
+          </div>
         </div>
         
         {!isEditing && (
@@ -880,6 +949,14 @@ function MySpace({ currentUsername, onProfileUpdated }) {
           {activeTab === 'private' ? 'No private posts yet.' : activeTab === 'public' ? 'No public posts yet.' : "You haven't posted anything yet."}
         </p>}
       </div>
+
+      <UsersListDialog
+        isOpen={activeListType !== null}
+        title={activeListType === 'followers' ? 'Followers' : 'Following'}
+        userIds={activeListType === 'followers' ? profile.followers : profile.following}
+        profilesByUserId={profilesByUserId}
+        onClose={() => setActiveListType(null)}
+      />
     </>
   );
 }
@@ -889,6 +966,7 @@ function Profile({ currentUsername }) {
   const [profile, setProfile] = useReduxState<any>(`profilePage.${userId}.profile`, { name: '', bio: '', profileImage: '', followers: [], following: [], followRequests: [] });
   const [posts, setPosts] = useReduxState<any[]>(`profilePage.${userId}.posts`, []);
   const [profilesByUserId, setProfilesByUserId] = useReduxState<Record<string, any>>(`profilePage.${userId}.profilesByUserId`, {});
+  const [activeListType, setActiveListType] = useReduxState<'followers' | 'following' | null>(`profilePage.${userId}.activeListType`, null);
   
   const isFollowing = profile.followers?.includes(currentUsername);
   const isRequested = profile.followRequests?.includes(currentUsername);
@@ -901,14 +979,24 @@ function Profile({ currentUsername }) {
   const fetchProfile = async () => {
     try {
       const res = await axios.get(`${API_URL}/users/${userId}`);
-      setProfile({
+      const loadedProfile = {
         name: res.data.name || '',
         bio: res.data.bio || '',
         profileImage: res.data.profileImage || '',
         followers: res.data.followers || [],
         following: res.data.following || [],
         followRequests: res.data.followRequests || [],
-      });
+      };
+      setProfile(loadedProfile);
+
+      const userIdsToFetch = [
+        ...loadedProfile.followers,
+        ...loadedProfile.following
+      ];
+      if (userIdsToFetch.length > 0) {
+        const reqProfiles = await fetchProfilesByUserId(userIdsToFetch);
+        setProfilesByUserId((prev) => ({ ...prev, ...reqProfiles }));
+      }
     } catch (err) {
       console.error('Error fetching profile:', err);
     }
@@ -951,8 +1039,6 @@ function Profile({ currentUsername }) {
     }
   };
 
-  const showPosts = userId === currentUsername || isFollowing;
-
   return (
     <>
       <div className="glass-card" style={{ marginBottom: '2rem', textAlign: 'center' }}>
@@ -963,8 +1049,12 @@ function Profile({ currentUsername }) {
         <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem', fontSize: '1.1rem' }}>{profile.bio || 'No bio provided.'}</p>
         
         <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', marginBottom: '1.5rem', color: 'var(--text-muted)' }}>
-          <div><strong style={{ color: 'var(--text-main)' }}>{profile.followers.length}</strong> Followers</div>
-          <div><strong style={{ color: 'var(--text-main)' }}>{profile.following.length}</strong> Following</div>
+          <div onClick={() => setActiveListType('followers')} style={{ cursor: 'pointer' }}>
+            <strong style={{ color: 'var(--text-main)' }}>{profile.followers.length}</strong> Followers
+          </div>
+          <div onClick={() => setActiveListType('following')} style={{ cursor: 'pointer' }}>
+            <strong style={{ color: 'var(--text-main)' }}>{profile.following.length}</strong> Following
+          </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -991,50 +1081,64 @@ function Profile({ currentUsername }) {
         </div>
       </div>
 
-      {!showPosts ? (
-        <div className="glass-card" style={{ textAlign: 'center', padding: '3.5rem 2rem', marginTop: '2rem', border: '1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ fontSize: '3.2rem', marginBottom: '1rem', filter: 'drop-shadow(0 0 15px rgba(99,102,241,0.25))' }}>🔒</div>
-          <h3 style={{ color: 'var(--text-main)', marginBottom: '0.6rem', fontSize: '1.45rem', fontWeight: 800 }}>This Account is Private</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', maxWidth: '380px', margin: '0 auto', lineHeight: 1.5 }}>
-            Follow this user to view their posts, photos, and active space updates.
-          </p>
-        </div>
-      ) : (
-        <>
-          <h3 style={{ marginBottom: '1.5rem', color: 'var(--text-muted)' }}>
-            Posts by {profile.name || userId}
-          </h3>
-          <div className="post-grid">
-            {posts.map(post => (
-              <div key={post._id} className="glass-card">
-                <div className="post-header" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                  <Avatar userId={post.userId} imageSrc={profilesByUserId[post.userId]?.profileImage} size={28} />
-                  <div>
-                    <strong style={{ color: 'var(--primary)' }}>{profilesByUserId[post.userId]?.displayName || post.userId}</strong>
-                    <span style={{ color: 'var(--text-muted)', marginLeft: '0.4rem' }}>@{post.userId}</span>
-                    <span style={{ color: 'var(--text-muted)' }}> • {new Date(post.createdAt).toLocaleString()}</span>
-                  </div>
-                </div>
-                <div className="post-content" dangerouslySetInnerHTML={{ __html: post.content }} />
-                {post.userId !== currentUsername && (
-                  <div className="post-actions">
-                    <button
-                      type="button"
-                      className={`like-btn ${(post.likes || []).includes(currentUsername) ? 'liked' : ''}`}
-                      onClick={() => handleToggleLike(post._id)}
-                    >
-                      <span>❤</span>
-                      <span>{(post.likes || []).includes(currentUsername) ? 'Liked' : 'Like'}</span>
-                      <span className="like-count">{(post.likes || []).length}</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-            {posts.length === 0 && <p style={{ color: 'var(--text-muted)', gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>This user hasn't posted anything public yet.</p>}
+      {userId !== currentUsername && !isFollowing && (
+        <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', border: '1px solid rgba(99, 102, 241, 0.25)', background: 'rgba(99, 102, 241, 0.05)', padding: '1rem 1.5rem', marginBottom: '2rem', borderRadius: '12px' }}>
+          <div style={{ fontSize: '1.5rem' }}>💡</div>
+          <div style={{ textAlign: 'left' }}>
+            <h4 style={{ margin: 0, color: '#a5b4fc', fontSize: '1rem', fontWeight: 700 }}>Viewing Public Posts</h4>
+            <p style={{ margin: '0.2rem 0 0', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              You are only seeing public posts. Follow this user to see their private posts.
+            </p>
           </div>
-        </>
+        </div>
       )}
+
+      <h3 style={{ marginBottom: '1.5rem', color: 'var(--text-muted)' }}>
+        Posts by {profile.name || userId}
+      </h3>
+      <div className="post-grid">
+        {posts.map(post => (
+          <div key={post._id} className="glass-card">
+            <div className="post-header" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <Avatar userId={post.userId} imageSrc={profilesByUserId[post.userId]?.profileImage} size={28} />
+              <div>
+                <strong style={{ color: 'var(--primary)' }}>{profilesByUserId[post.userId]?.displayName || post.userId}</strong>
+                <span style={{ color: 'var(--text-muted)', marginLeft: '0.4rem' }}>@{post.userId}</span>
+                <span style={{ color: 'var(--text-muted)' }}> • {new Date(post.createdAt).toLocaleString()}</span>
+              </div>
+            </div>
+            <div className="post-content" dangerouslySetInnerHTML={{ __html: post.content }} />
+            {post.userId !== currentUsername && (
+              <div className="post-actions">
+                <button
+                  type="button"
+                  className={`like-btn ${(post.likes || []).includes(currentUsername) ? 'liked' : ''}`}
+                  onClick={() => handleToggleLike(post._id)}
+                >
+                  <span>❤</span>
+                  <span>{(post.likes || []).includes(currentUsername) ? 'Liked' : 'Like'}</span>
+                  <span className="like-count">{(post.likes || []).length}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+        {posts.length === 0 && (
+          <p style={{ color: 'var(--text-muted)', gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
+            {isFollowing || userId === currentUsername 
+              ? "This user hasn't posted anything yet." 
+              : "This user hasn't posted anything public yet."}
+          </p>
+        )}
+      </div>
+
+      <UsersListDialog
+        isOpen={activeListType !== null}
+        title={activeListType === 'followers' ? 'Followers' : 'Following'}
+        userIds={activeListType === 'followers' ? profile.followers : profile.following}
+        profilesByUserId={profilesByUserId}
+        onClose={() => setActiveListType(null)}
+      />
     </>
   );
 }

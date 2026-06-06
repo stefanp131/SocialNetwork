@@ -18,9 +18,26 @@ app.use(morgan('dev'));
 const PORT = process.env.PORT || 4003;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/post_db';
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://localhost:5672';
+const USER_SERVICE_URL = process.env.USER_SERVICE_URL || 'http://localhost:4002';
 let isServerStarted = false;
 let hasMongoConnected = false;
 let mongoReconnectTimer;
+
+async function getFollowedUsers(viewer: string): Promise<string[]> {
+  if (!viewer) return [];
+  try {
+    const response = await fetch(`${USER_SERVICE_URL}/${viewer}`);
+    if (!response.ok) {
+      console.error(`Failed to fetch user profile for ${viewer}: ${response.statusText}`);
+      return [];
+    }
+    const data: any = await response.json();
+    return data.following || [];
+  } catch (error) {
+    console.error(`Error fetching followed users for ${viewer}:`, error);
+    return [];
+  }
+}
 
 async function connectRabbitMQ() {
   try {
@@ -116,22 +133,33 @@ const Post = mongoose.model('Post', PostSchema);
 app.get('/', async (req, res) => {
   try {
     const filter: any = {};
+    const viewer = req.query.viewer as string;
+    const followedUsers = viewer ? await getFollowedUsers(viewer) : [];
 
     if (req.query.userIds) {
       // Fetch posts for multiple users (Our Space)
-      const usersArray = req.query.userIds.split(',');
+      const usersArray = (req.query.userIds as string).split(',');
       filter.userId = { $in: usersArray };
-      filter.visibility = 'public'; // Only public posts for feed
+      filter.$or = [
+        { visibility: 'public' },
+        { userId: viewer },
+        { userId: { $in: followedUsers } }
+      ];
     } else if (req.query.userId) {
       // Fetch posts for single user (Profile / My Space)
       filter.userId = req.query.userId;
-      // If viewer is the owner, show all posts. Otherwise only public.
-      if (req.query.viewer !== req.query.userId) {
-        filter.visibility = 'public';
-      }
+      filter.$or = [
+        { visibility: 'public' },
+        { userId: viewer },
+        { userId: { $in: followedUsers } }
+      ];
     } else {
       // Global feed (if ever needed)
-      filter.visibility = 'public';
+      filter.$or = [
+        { visibility: 'public' },
+        { userId: viewer },
+        { userId: { $in: followedUsers } }
+      ];
     }
 
     const posts = await Post.find(filter).sort({ createdAt: -1 });
@@ -162,6 +190,14 @@ app.post('/:id/like', async (req, res) => {
     const post = await Post.findById(req.params.id);
     if (!post) {
       return res.status(404).json({ error: 'Post not found' });
+    }
+
+    // Enforce post visibility rules
+    if (post.visibility === 'private' && post.userId !== userId) {
+      const followedUsers = await getFollowedUsers(userId);
+      if (!followedUsers.includes(post.userId)) {
+        return res.status(403).json({ error: 'You do not have permission to access this post' });
+      }
     }
 
     if (post.userId === userId) {

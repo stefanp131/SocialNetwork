@@ -87,6 +87,7 @@ services:
       - PORT=4003
       - MONGO_URI=mongodb://mongodb:27017/post_db
       - RABBITMQ_URL=amqp://rabbitmq:5672
+      - USER_SERVICE_URL=http://user-service:4002
     depends_on:
       mongodb:
         condition: service_healthy
